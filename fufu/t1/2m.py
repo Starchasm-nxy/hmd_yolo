@@ -35,7 +35,6 @@ D435_HEIGHT = 480
 # MODEL_CROP_PATH = "/home/fu/weights/tong_blue_v0.pt"
 MODEL_PATH = "/home/fu/yolo/weights/tong_blue_v0.pt"
 
-
 # 历史坐标超时清空开关及超时时间（秒）
 HISTORY_CLEAR_ENABLED = True
 HISTORY_CLEAR_TIMEOUT = 10.0
@@ -48,8 +47,8 @@ FRAME_SKIP_N = 2
 LOCK_MAX_HIT = 15                     # 锁定最大命中帧数（达到后强制解锁重判）
 LOCK_MAX_MISS = 7                     # 锁定最大丢失帧数（达到后解锁）
 LOCK_SEARCH_RATIO = 2.5               # 搜索框相对于目标尺寸的放大比例
-LOCK_MIN_SEARCH_RADIUS = 180          # 搜索框最小半边长
-LOCK_MAX_SEARCH_RADIUS = 290          # 搜索框最大半边长
+LOCK_MIN_SEARCH_RADIUS = 130          # 搜索框最小半边长
+LOCK_MAX_SEARCH_RADIUS = 270          # 搜索框最大半边长
 
 # 模型推理参数（按模式区分）
 MODEL_2M_CONF = 0.5                   # 2m模式置信度阈值（全图+裁剪共用）
