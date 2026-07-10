@@ -1,0 +1,114 @@
+# ============================================================
+# D435 + RTAB-Map SLAM — RViz Configuration
+# ============================================================
+# Usage:
+#   rviz -d /home/fu/yolo/slam/rviz/d435_rtabmap.rviz
+#
+# Or launch everything together:
+#   roslaunch d435_rtabmap.launch rviz:=true
+#
+# Displays configured:
+#   - TF frames (map → odom → camera_link)
+#   - MapCloud: 3D point cloud of the mapped environment
+#   - MapGraph: pose graph (nodes + loop closure edges)
+#   - Grid:     2D occupancy grid map
+#   - Image:    live color camera feed
+# ============================================================
+
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+  - Class: rviz/Views
+    Name: Views
+  - Class: rviz/Tool Properties
+    Name: Tool Properties
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    # ---- Coordinate Frames ----
+    - Class: rviz/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 15
+      All Enabled: false
+      Marker Scale: 0.5
+      Show Arrows: true
+      Update Interval: 0
+
+    # ---- 3D Point Cloud Map (RTAB-Map plugin) ----
+    - Class: rtabmap_ros/MapCloud
+      Name: MapCloud
+      Enabled: true
+      Alpha: 1.0
+      Color Scheme: map
+      Node Filtering: 0
+      Topic: /rtabmap/mapData
+
+    # ---- Pose Graph (RTAB-Map plugin) ----
+    - Class: rtabmap_ros/MapGraph
+      Name: MapGraph
+      Enabled: true
+      Color: 0; 255; 0
+      Topic: /rtabmap/mapData
+
+    # ---- 2D Occupancy Grid (RTAB-Map plugin) ----
+    - Class: rtabmap_ros/Grid
+      Name: Grid
+      Enabled: true
+      Alpha: 0.75
+      Color Scheme: map
+      Topic: /rtabmap/mapData
+
+    # ---- Live Color Camera ----
+    - Class: rviz/Image
+      Name: Color Image
+      Enabled: true
+      Topic: /camera/color/image_raw
+      Transport Hint: raw
+
+    # ---- 3D PointCloud2 (raw cloud from rtabmap) ----
+    - Class: rviz/PointCloud2
+      Name: Cloud Map
+      Enabled: false
+      Topic: /rtabmap/cloud_map
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: RGB8
+
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Tools:
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/Interact
+    - Class: rviz/Measure
+    - Class: rviz/SetInitialPose
+    - Class: rviz/SetGoal
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 5
+      Focal Point: 0; 0; 1.5
+      Name: 3D View
+      Pitch: 0.5
+      Yaw: 0
+    Saved:
+      - Class: rviz/Orbit
+        Distance: 5
+        Focal Point: 0; 0; 1.5
+        Name: 3D View
+        Pitch: 0.5
+        Yaw: 0
+      - Class: rviz/TopDownOrtho
+        Name: Top-down
+  Window Geometry:
+    Displays:
+      collapse: false
+    Height: 900
+    Width: 1400
+    X: 50
+    Y: 50

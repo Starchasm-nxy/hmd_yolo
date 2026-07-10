@@ -1,0 +1,27 @@
+yolo task=detect mode=train model=yolov8n.yaml data=/home/hy/ultralytics/xunlian/tong.yaml pretrained=/home/hy/ultralytics/xunlian/zcbest.pt imgsz=640 save=True epochs=400 patience=50 resume=True device=0 lr0=0.01 lrf=0.01 momentum=0.937 weight_decay=0.0005 warmup_epochs=3 warmup_momentum=0.8 box=7.5 cls=0.5 dfl=1.5 hsv_h=0.015 hsv_s=0.7 hsv_v=0.4 degrees=0.0 translate=0.1 scale=0.5 shear=0.0 perspective=0.0 flipud=0.0 fliplr=0.5 mosaic=1 mixup=0.0 copy_paste=0.0
+#通过 hsv_* 增强色彩扰动（如饱和度变化 70%），scale=0.5 允许更大幅度的缩放（±50%），translate=0.1 允许更强的平移。这些设置能提升模型对不同光照、尺度的泛化能力，但可能增加训练难度（尤其数据集较小时）。
+#实战建议
+
+    先使用默认参数：
+    用第二组命令快速训练一个基线模型，观察收敛趋势和验证指标，确定任务难度和模型表现。
+    针对性调整参数：
+        若定位精度不足，增加 box 权重；
+        若模型过拟合，增强数据扰动（如提高 hsv_s、scale）；
+        若训练后期波动大，改用自适应学习率或降低 lr0。
+    监控关键指标：
+    关注训练日志中的 box_loss、cls_loss、dfl_loss 变化，以及 mAP50、mAP50-95 等指标的波动情况，据此调整参数。
+    
+
+
+
+👇️    
+    优化 “场景鲁棒性”（解决实际环境干扰）
+
+    对抗光照变化：
+        增强数据集中的光照扰动：hsv_h=0.05（原 0.015，扩大色调变化）、hsv_s=0.9（原 0.7，扩大饱和度范围）、hsv_v=0.6（原 0.4，允许更暗 / 更亮的图像）；
+        训练时添加auto_augment=randaugment（自动随机增强），模拟逆光、阴影等极端光照。
+    对抗无人机晃动：
+        增加 “动态模糊” 增强：blur_limit=(5, 9)（模拟快速移动时的模糊）；
+        适当降低scale=0.3（原 0.5），避免过度缩放导致小目标丢失（晃动时小目标本身已可能模糊）。
+
+

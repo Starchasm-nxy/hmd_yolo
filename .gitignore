@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Large video/data directories (uncomment if you want to include)
+videos_color/
+videos_depth/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Empty placeholder files
+data.txt
+gaozhi.txt

@@ -1,0 +1,58 @@
+# ==================== 相机设置 ====================
+camera:
+  width: 848
+  height: 480
+  fps: 30
+
+# ==================== 模型设置 ====================
+model:
+  path: "/home/fu/weights/tong_blue_v0.pt"
+  device: "cpu"
+  iou: 0.45
+  imgsz_step: 32
+
+# ==================== 推理参数 ====================
+inference:
+  locked:
+    conf: 0.5
+  unlocked:
+    "1m":
+      imgsz: 640
+      conf: 0.5
+    "2m":
+      imgsz: 640
+      conf: 0.5
+  max_area: 100000
+
+# ==================== 锁定追踪状态机参数 ====================
+lock_tracker:
+  max_hit: 15
+  max_miss: 7
+  search_ratio: 2.5
+  min_search_radius: 130
+  max_search_radius: 270
+
+# ==================== 跳帧控制 ====================
+frame_skip:
+  enabled: false
+  n: 2
+
+# ==================== 历史坐标超时 ====================
+history:
+  clear_enabled: true
+  clear_timeout: 10.0
+
+# ==================== 显示 ====================
+display:
+  window_name: "d435"
+
+# ==================== 文件 ====================
+files:
+  data: "data.txt"
+  output: "gaozhi.txt"
+  clear_on_start: ["data.txt", "gaozhi.txt"]
+
+# ==================== 日志 ====================
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(message)s"

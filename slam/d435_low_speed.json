@@ -1,0 +1,20 @@
+{
+    "streams": [
+        {
+            "type": "depth",
+            "width": 640,
+            "height": 480,
+            "format": "Z16",
+            "fps": 15
+        },
+        {
+            "type": "color",
+            "width": 640,
+            "height": 480,
+            "format": "RGB8",
+            "fps": 15
+        }
+    ],
+    "enable auto exposure": true,
+    "visual preset": "high accuracy"
+}
