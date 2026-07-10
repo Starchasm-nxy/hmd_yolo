@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="tracking_world">
+
+    <!-- ── Lighting ──────────────────────────────── -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- ── Camera Saver Plugin (saves frames to /tmp/gazebo_frame.jpg) ── -->
+    <plugin name="camera_saver" filename="/home/fu/stm32demo_ws/gazebo/libCameraSaver.so"/>
+
+    <!-- ── Ground plane ───────────────────────────── -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- Pan-Tilt Camera                                -->
+    <!-- ══════════════════════════════════════════════ -->
+    <include>
+      <uri>model://pan_tilt_camera</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- Tracking targets                              -->
+    <!-- ══════════════════════════════════════════════ -->
+
+    <!-- Red cube — left side -->
+    <model name="target_red">
+      <pose>-3 8 0.5 0 0 0</pose>
+      <static>1</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.3</size></box></geometry>
+          <material><ambient>1 0 0 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Green cube — center -->
+    <model name="target_green">
+      <pose>0 8 0.5 0 0 0</pose>
+      <static>1</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.3</size></box></geometry>
+          <material><ambient>0 1 0 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Blue cube — right side -->
+    <model name="target_blue">
+      <pose>3 8 0.5 0 0 0</pose>
+      <static>1</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.3</size></box></geometry>
+          <material><ambient>0 0 1 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Yellow cylinder — moving target potential -->
+    <model name="target_yellow">
+      <pose>-1 6 0.5 0 0 0</pose>
+      <static>1</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><cylinder><radius>0.15</radius><length>0.5</length></cylinder></geometry>
+          <material><ambient>1 1 0 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

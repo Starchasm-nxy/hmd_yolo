@@ -1,0 +1,184 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="pan_tilt_unit">
+
+    <!-- ============================================ -->
+    <!-- 底座：矮圆柱 + 小球（固定）                    -->
+    <!-- ============================================ -->
+    <link name="base_link">
+      <pose>0 0 0.04 0 0 0</pose>
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.01</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.01</iyy><iyz>0</iyz>
+          <izz>0.01</izz>
+        </inertia>
+      </inertial>
+
+      <!-- 矮圆柱底座 -->
+      <visual name="base_cylinder">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder><radius>0.15</radius><length>0.08</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.25 0.25 0.30 1</ambient>
+          <diffuse>0.35 0.35 0.40 1</diffuse>
+        </material>
+      </visual>
+      <collision name="base_collision">
+        <geometry>
+          <cylinder><radius>0.15</radius><length>0.08</length></cylinder>
+        </geometry>
+      </collision>
+
+      <!-- 底座顶部小球（连接件） -->
+      <visual name="base_ball">
+        <pose>0 0 0.06 0 0 0</pose>
+        <geometry>
+          <sphere><radius>0.04</radius></sphere>
+        </geometry>
+        <material>
+          <ambient>0.6 0.6 0.65 1</ambient>
+          <diffuse>0.7 0.7 0.75 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- ============================================ -->
+    <!-- 一级平台（扁长方体）+ 半圆连接件              -->
+    <!-- 绕 Z 轴水平旋转                              -->
+    <!-- ============================================ -->
+    <joint name="pan_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>pan_link</child>
+      <pose>0 0 0.10 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-3.14</lower>
+          <upper>3.14</upper>
+          <effort>5</effort>
+          <velocity>3</velocity>
+        </limit>
+        <dynamics>
+          <damping>0.3</damping>
+          <friction>0.1</friction>
+        </dynamics>
+      </axis>
+    </joint>
+
+    <link name="pan_link">
+      <inertial>
+        <mass>0.3</mass>
+        <inertia>
+          <ixx>0.001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.001</iyy><iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+      </inertial>
+
+      <!-- 扁长方体平台 -->
+      <visual name="pan_platform">
+        <pose>0 0 -0.015 0 0 0</pose>
+        <geometry>
+          <box><size>0.14 0.14 0.03</size></box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.55 1</ambient>
+          <diffuse>0.20 0.20 0.65 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 平台上方的半球连接件 -->
+      <visual name="pan_hemisphere">
+        <pose>0 0 0.005 0 0 0</pose>
+        <geometry>
+          <sphere><radius>0.035</radius></sphere>
+        </geometry>
+        <material>
+          <ambient>0.6 0.6 0.65 1</ambient>
+          <diffuse>0.7 0.7 0.75 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- ============================================ -->
+    <!-- 二级：长圆柱（可上下转动）                    -->
+    <!-- 绕 Y 轴俯仰                                  -->
+    <!-- ============================================ -->
+    <joint name="tilt_joint" type="revolute">
+      <parent>pan_link</parent>
+      <child>tilt_link</child>
+      <pose>0 0 0.02 0 0 0</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1.05</lower>    <!-- -60 deg -->
+          <upper>1.05</upper>     <!-- +60 deg -->
+          <effort>5</effort>
+          <velocity>3</velocity>
+        </limit>
+        <dynamics>
+          <damping>0.3</damping>
+          <friction>0.1</friction>
+        </dynamics>
+      </axis>
+    </joint>
+
+    <link name="tilt_link">
+      <inertial>
+        <mass>0.15</mass>
+        <inertia>
+          <ixx>0.0005</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0001</iyy><iyz>0</iyz>
+          <izz>0.0005</izz>
+        </inertia>
+      </inertial>
+
+      <!-- 长圆柱筒（水平方向，镜头朝前） -->
+      <visual name="tilt_barrel">
+        <pose>0.10 0 0 0 1.57 0</pose>
+        <geometry>
+          <cylinder><radius>0.025</radius><length>0.20</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.50 0.15 0.15 1</ambient>
+          <diffuse>0.60 0.20 0.20 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 镜头前端（稍大的圆圈） -->
+      <visual name="tilt_lens">
+        <pose>0.20 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder><radius>0.035</radius><length>0.02</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.15 1</ambient>
+          <diffuse>0.10 0.10 0.10 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- ============================================ -->
+    <!-- PID 位置控制器                                -->
+    <!-- 键盘通过 ign topic -p 发送 JointCmd           -->
+    <!-- ============================================ -->
+    <plugin name="joint_controllers"
+            filename="/usr/lib/x86_64-linux-gnu/gazebo-11/plugins/libJointControlPlugin.so">
+      <controller type="position">
+        <joint>pan_joint</joint>
+        <target>0.0</target>
+        <pid_gains>30 0 3</pid_gains>
+      </controller>
+      <controller type="position">
+        <joint>tilt_joint</joint>
+        <target>0.0</target>
+        <pid_gains>30 0 3</pid_gains>
+      </controller>
+    </plugin>
+
+  </model>
+</sdf>

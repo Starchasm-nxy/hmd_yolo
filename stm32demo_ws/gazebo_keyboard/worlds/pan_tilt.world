@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="pan_tilt_world">
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- Pan-Tilt Unit -->
+    <include>
+      <uri>model://pan_tilt_unit</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <!-- 参考标记物：红球（左前方）-->
+    <model name="marker_left">
+      <pose>-2 1 0.5 0 0 0</pose>
+      <static>1</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><sphere><radius>0.15</radius></sphere></geometry>
+          <material><ambient>1 0 0 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 参考标记物：蓝球（右前方）-->
+    <model name="marker_right">
+      <pose>2 1 0.5 0 0 0</pose>
+      <static>1</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><sphere><radius>0.15</radius></sphere></geometry>
+          <material><ambient>0 0 1 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

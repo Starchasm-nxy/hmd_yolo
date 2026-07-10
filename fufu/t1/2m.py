@@ -33,7 +33,7 @@ D435_HEIGHT = 480
 # MODEL_1M_PATH = "/home/fu/weights/tong_blue_v0.pt"
 # MODEL_FULL_PATH = "/home/fu/weights/tong_blue_v0.pt"
 # MODEL_CROP_PATH = "/home/fu/weights/tong_blue_v0.pt"
-MODEL_PATH = "/home/fu/weights/tong_blue_v0.pt"
+MODEL_PATH = "/home/fu/yolo/weights/tong_blue_v0.pt"
 
 
 # 历史坐标超时清空开关及超时时间（秒）
