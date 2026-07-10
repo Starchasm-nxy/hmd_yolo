@@ -225,7 +225,6 @@ def main():
                         avg_mm = last_valid_dist
 
                     if avg_mm is not None:
-                        dist_text = f"{avg_mm / 10:.1f} cm"   # mm → cm
                     else:
                         dist_text = "Out of range"
 
