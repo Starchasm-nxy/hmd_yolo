@@ -1296,7 +1296,14 @@ class PipelineOrchestrator:
                         self._usb_camera.stop()
                     if self._d435_thread:
                         self._d435_thread.join()
-                    cv2.destroyAllWindows()
+                    # 清空残留帧，防止旧窗口被复活覆盖新窗口
+                    while not self._display_queue.empty():
+                        try:
+                            self._display_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    # 通过 sentinel 通知主线程销毁窗口并重置状态
+                    self._display_queue.put((None, "__switch__"))
                     time.sleep(MODE_SWITCH_DELAY)
                     self._running = False
 
@@ -1381,9 +1388,16 @@ if __name__ == '__main__':
             if not display_queue.empty():
                 frame, window_name = display_queue.get()
 
+                # 模式切换信号：由主线程统一执行 GUI 操作
+                if window_name == "__switch__":
+                    cv2.destroyAllWindows()
+                    last_window_name = ""
+                    continue
+
                 if window_name != last_window_name:
                     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
                     cv2.resizeWindow(window_name, DISPLAY_WIN_W, DISPLAY_WIN_H)
+                    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
                     last_window_name = window_name
 
                 if mode_state.get_c() == 3 and calib_mtx is not None:

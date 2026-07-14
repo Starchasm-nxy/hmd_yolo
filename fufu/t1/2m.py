@@ -970,6 +970,7 @@ def main() -> None:
                 cv2.namedWindow(win_name, cv2.WINDOW_NORMAL |
                                 cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
                 cv2.resizeWindow(win_name, D435_WIDTH, D435_HEIGHT)
+                cv2.setWindowProperty(win_name, cv2.WND_PROP_TOPMOST, 1)
                 window_created = True
 
             cv2.imshow(win_name, frame)           # 显示画面
