@@ -342,6 +342,8 @@ class ModeState:
         self._b: int = 0
         self._d: int = 0
         self.start_time: Optional[float] = None
+        self._usb_used: bool = False
+        self._pause_start: float = 0.0  # D435 暂停计时起点
 
     def get(self) -> Tuple[int, int, int]:
         """读取完整状态 (c, b, d)"""
@@ -362,6 +364,31 @@ class ModeState:
         """读取 USB 目标选择编号 1~6"""
         with self._lock:
             return self._d
+
+    def get_usb_used(self) -> bool:
+        """USB 聚类是否已完成"""
+        with self._lock:
+            return self._usb_used
+
+    def set_usb_used(self) -> None:
+        """标记 USB 已使用"""
+        with self._lock:
+            self._usb_used = True
+
+    def reset_usb_used(self) -> None:
+        """重置 USB 使用标记（新一轮开始前）"""
+        with self._lock:
+            self._usb_used = False
+
+    def get_pause_start(self) -> float:
+        """读取暂停计时起点"""
+        with self._lock:
+            return self._pause_start
+
+    def set_pause_start(self, t: float) -> None:
+        """设置暂停计时起点"""
+        with self._lock:
+            self._pause_start = t
 
     def set(self, c: int, b: int = 0, d: int = 0) -> None:
         """写入模式状态"""
@@ -420,10 +447,13 @@ class ModeState:
                 self._c = 2
                 self._b = 1
             elif content == '0':
-                for _ in range(5):
-                    yellow_log("检测到0模式，关闭摄像头")
+                if not self._usb_used:
+                    # USB 还没用过，无视 0 当作初始化噪声
+                    return False
                 self._c = 0
                 self._b = 0
+                self._pause_start = time.time()
+                yellow_log("检测到0模式，暂停 D435 识别")
             else:
                 logger.info("未检测到内容，等待...")
                 return False
@@ -1078,6 +1108,7 @@ class USBDetectionPipeline:
                     and time.time() - start_cluster_time > CLUSTER_TIMEOUT):
                 yellow_log("聚类超时(9s)，输出 0 0 0 0 并进入 0 模式")
                 self._writer.write_usb("0 0 0 0")
+                self._mode_state.set_usb_used()
                 self._mode_state.set(0)
                 break
 
@@ -1153,6 +1184,7 @@ class USBDetectionPipeline:
 
                     clustered_once = True
                     final_result_str = result_str
+                    self._mode_state.set_usb_used()
                 else:
                     if last_result != "0 0 0 0":
                         self._writer.write_usb("0 0 0 0")
@@ -1178,10 +1210,11 @@ class D435DetectionPipeline:
     MODEL_DELAY = 3.0
 
     def __init__(self, writer: OutputWriter, display_queue: queue.Queue,
-                 mode_state: 'ModeState') -> None:
+                 mode_state: 'ModeState', camera_src: 'CameraSource') -> None:
         self._writer = writer
         self._display_queue = display_queue
         self._mode_state = mode_state
+        self._camera_src = camera_src
 
     def run(self, stop_event: threading.Event,
             start_event: threading.Event) -> None:
@@ -1192,10 +1225,7 @@ class D435DetectionPipeline:
         self._writer.reset(cold_start=True)
 
         detector = YOLODetector()
-        camera_src = CameraSource()
         tracker = LockTracker()
-
-        camera_src.start()
 
         last_b: Optional[int] = None
         last_mode: Optional[str] = None
@@ -1233,7 +1263,7 @@ class D435DetectionPipeline:
                 else:
                     effective_mode = mode
 
-                got, frame, last_seq = camera_src.get_frame(last_seq)
+                got, frame, last_seq = self._camera_src.get_frame(last_seq)
                 if not got:
                     time.sleep(FRAME_NOT_READY_SLEEP)
                     continue
@@ -1299,7 +1329,7 @@ class D435DetectionPipeline:
 
                 logger.info(f"gaozhi.txt 内容: {self._writer.read_last()}")
         finally:
-            camera_src.stop()
+            pass  # camera lifecycle is managed by Orchestrator
 
 
 # ======================================================================
@@ -1309,6 +1339,8 @@ class D435DetectionPipeline:
 class PipelineOrchestrator:
     """根据 ModeState 变化启停 USB/D435 管道，管理线程生命周期"""
 
+    D435_PAUSE_TIMEOUT = 20.0   # D435 暂停超时（秒），超时后释放相机
+
     def __init__(self, mode_state: 'ModeState', writer: OutputWriter,
                  display_queue: queue.Queue) -> None:
         self._mode_state = mode_state
@@ -1317,10 +1349,57 @@ class PipelineOrchestrator:
         self._usb_camera: Optional['USBCameraSource'] = None
         self._usb_pipeline: Optional['USBDetectionPipeline'] = None
         self._d435_pipeline: Optional['D435DetectionPipeline'] = None
-        self._usb_capture_thread: Optional[threading.Thread] = None
+        self._d435_camera: Optional['CameraSource'] = None
         self._usb_detect_thread: Optional[threading.Thread] = None
         self._d435_thread: Optional[threading.Thread] = None
         self._running: bool = False
+        self._d435_released: bool = False  # D435 因超时已释放，等 data.txt 清空
+
+    # ==================================================================
+    # 内部工具方法
+    # ==================================================================
+
+    def _data_txt_content(self) -> str:
+        """读取 data.txt 内容"""
+        try:
+            with open('data.txt', 'r') as f:
+                return f.read().strip()
+        except Exception:
+            return ''
+
+    def _drain_and_switch_window(self) -> None:
+        """清空 display_queue 并发送窗口切换 sentinel"""
+        while not self._display_queue.empty():
+            try:
+                self._display_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._display_queue.put((None, "__switch__"))
+
+    def _stop_pipeline(self, stop_event: threading.Event) -> None:
+        """停止当前运行中的管线并清理资源"""
+        if not self._running:
+            return
+        stop_event.set()
+        if self._usb_detect_thread:
+            self._usb_detect_thread.join()
+            self._usb_detect_thread = None
+        if self._d435_thread:
+            self._d435_thread.join()
+            self._d435_thread = None
+        if self._usb_camera:
+            self._usb_camera.stop()
+            self._usb_camera = None
+        if self._d435_camera:
+            self._d435_camera.stop()
+            self._d435_camera = None
+        self._drain_and_switch_window()
+        time.sleep(MODE_SWITCH_DELAY)
+        self._running = False
+
+    # ==================================================================
+    # 主循环
+    # ==================================================================
 
     def run(self, start_event: threading.Event) -> None:
         """监测 ModeState.c 变化，启停对应相机管道"""
@@ -1329,63 +1408,105 @@ class PipelineOrchestrator:
 
         check_camera(cam_num)
 
+        # ==== Phase 0: 程序启动即开 USB 相机预热 ====
+        self._usb_camera = USBCameraSource(
+            cam_num, files_for_pixel, self._mode_state)
+        self._usb_camera.start()
+        yellow_log("USB 相机已开启（预热中，等待指令）")
+
         while True:
-            c = self._mode_state.get_c()
-            if c != last_c:
-                logger.info(f"main_control 检测到 c 变化: {last_c} -> {c}")
+            # ---- D435 暂停超时检测 ----
+            if (not self._d435_released
+                    and self._d435_camera is not None
+                    and self._d435_thread is not None
+                    and self._mode_state.get_c() == 0):
+                elapsed = time.time() - self._mode_state.get_pause_start()
+                if elapsed > self.D435_PAUSE_TIMEOUT:
+                    yellow_log(f"D435 暂停超时 {self.D435_PAUSE_TIMEOUT}s，释放相机")
+                    self._stop_pipeline(stop_event)
+                    self._d435_released = True
+                    self._writer.reset(cold_start=True)
+                    continue
 
-                if self._running:
-                    stop_event.set()
-                    if self._usb_capture_thread:
-                        self._usb_capture_thread.join()
-                    if self._usb_detect_thread:
-                        self._usb_detect_thread.join()
-                    if self._usb_camera:
-                        self._usb_camera.stop()
-                    if self._d435_thread:
-                        self._d435_thread.join()
-                    # 清空残留帧，防止旧窗口被复活覆盖新窗口
-                    while not self._display_queue.empty():
-                        try:
-                            self._display_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                    # 通过 sentinel 通知主线程销毁窗口并重置状态
-                    self._display_queue.put((None, "__switch__"))
-                    time.sleep(MODE_SWITCH_DELAY)
-                    self._running = False
-
-                stop_event = threading.Event()
-
-                if c == 3:
+            # ---- 等待 data.txt 清空后重新开启 USB ----
+            if self._d435_released:
+                if self._data_txt_content() == '':
+                    yellow_log("data.txt 已清空，开启新一轮 USB 预热")
+                    self._mode_state.reset_usb_used()
+                    start_event.clear()
+                    # 重新打开 USB 相机
                     self._usb_camera = USBCameraSource(
                         cam_num, files_for_pixel, self._mode_state)
                     self._usb_camera.start()
-                    self._usb_pipeline = USBDetectionPipeline(
-                        model_usb, self._usb_camera, self._writer,
-                        self._display_queue, self._mode_state, eps, min_samples)
-                    self._usb_capture_thread = None  # camera has its own thread
-                    self._usb_detect_thread = threading.Thread(
-                        target=self._usb_pipeline.run,
-                        args=(stop_event, start_event))
-                    self._usb_detect_thread.start()
-                    self._d435_thread = None
-                    self._running = True
-                elif c == 2:
-                    self._d435_pipeline = D435DetectionPipeline(
-                        self._writer, self._display_queue, self._mode_state)
-                    self._d435_thread = threading.Thread(
-                        target=self._d435_pipeline.run,
-                        args=(stop_event, start_event))
-                    self._d435_thread.start()
-                    self._usb_camera = None
-                    self._usb_pipeline = None
-                    self._running = True
+                    yellow_log("USB 相机已开启（预热中，等待指令）")
+                    self._d435_released = False
+                    last_c = self._mode_state.get_c()  # 同步当前状态，避免误触发
+                time.sleep(FILE_POLL_SLEEP)
+                continue
 
-                if c == 0:
-                    self._writer.reset(cold_start=True)
+            c = self._mode_state.get_c()
+            if c == last_c:
+                time.sleep(ORCHESTRATOR_POLL_SLEEP)
+                continue
 
-                last_c = c
+            logger.info(f"main_control 检测到 c 变化: {last_c} -> {c}")
+
+            if c == 3:
+                # ---- USB 检测模式 ----
+                if self._running:
+                    self._stop_pipeline(stop_event)
+
+                stop_event = threading.Event()
+                self._usb_pipeline = USBDetectionPipeline(
+                    model_usb, self._usb_camera, self._writer,
+                    self._display_queue, self._mode_state, eps, min_samples)
+                self._usb_detect_thread = threading.Thread(
+                    target=self._usb_pipeline.run,
+                    args=(stop_event, start_event))
+                self._usb_detect_thread.start()
+                self._d435_thread = None
+                self._d435_camera = None
+                self._running = True
+
+            elif c == 2:
+                # ---- D435 检测模式 ----
+                # 如果是从暂停恢复（0→2）且 D435 管线仍在运行，不重启
+                if last_c == 0 and self._d435_thread is not None \
+                        and self._d435_thread.is_alive():
+                    yellow_log("D435 恢复识别")
+                    last_c = c
+                    time.sleep(ORCHESTRATOR_POLL_SLEEP)
+                    continue
+
+                if self._running:
+                    self._stop_pipeline(stop_event)
+
+                stop_event = threading.Event()
+                # 先开 D435 相机预热
+                self._d435_camera = CameraSource()
+                self._d435_camera.start()
+                yellow_log("D435 相机已开启（预热中）")
+                # 再启管线
+                self._d435_pipeline = D435DetectionPipeline(
+                    self._writer, self._display_queue, self._mode_state,
+                    self._d435_camera)
+                self._d435_thread = threading.Thread(
+                    target=self._d435_pipeline.run,
+                    args=(stop_event, start_event))
+                self._d435_thread.start()
+                self._usb_pipeline = None
+                self._running = True
+
+            elif c == 0:
+                # ---- D435 暂停 / 首次0 ----
+                if not self._mode_state.get_usb_used():
+                    # USB 还没用过，c=0 不应出现（set_from_command 已拦截）
+                    # 但 D435 完成后的 0 不停止管线，管线内部自行暂停
+                    pass
+                # D435 管线在内部检测到 b=0 时自动暂停检测，相机继续推流
+                # 超时由上面的检测逻辑处理
+
+            last_c = c
             time.sleep(ORCHESTRATOR_POLL_SLEEP)
 
 
