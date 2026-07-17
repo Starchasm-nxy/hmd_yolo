@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional, Tuple, Any, Dict
 
+import json
 import numpy as np
 import pyrealsense2 as rs
 from ultralytics import YOLO
@@ -34,23 +35,29 @@ files_for_pixel = 'calib_resultA.npz'            # 畸变校正文件（根据�
 cam_num = '/dev/v4l/by-id/usb-Generic_USB_Camera_200901010001-video-index0'
 model_usb = YOLO("/home/fu/yolo/weights/4m12kd.pt")
 
-# ==================== USB相机参数（t8.py 导出） ====================
-# 导出时间: 2026-07-15 10:06:41
+# ---- USB 相机参数（从 t8.py 导出的 camera_params.json 加载） ----
+def _load_usb_params(json_path: str = 'camera_params.json') -> dict:
+    """加载 USB 相机参数 JSON 文件，不存在则返回默认值"""
+    defaults = {
+        'auto_exposure': 3, 'exposure': 50, 'brightness': -37,
+        'contrast': 32, 'saturation': 64, 'gain': 37, 'gamma': 100,
+        'auto_wb': 1, 'wb_temperature': 4600, 'sharpness': 7,
+        'backlight': 0, 'hue': 0,
+    }
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        merged = {**defaults, **{k: v for k, v in data.items() if not k.startswith('_')}}
+        print(f"[INFO] USB 相机参数已从 {json_path} 加载")
+        return merged
+    except FileNotFoundError:
+        print(f"[WARN] {json_path} 不存在，使用默认参数")
+        return defaults
+    except Exception as e:
+        print(f"[WARN] 加载 {json_path} 失败: {e}，使用默认参数")
+        return defaults
 
-USB_AUTO_EXPOSURE = 3  # 0=手动 1=自动 3=光圈优先
-USB_EXPOSURE = 50  # 手动曝光值
-USB_BRIGHTNESS = -37  # 亮度
-USB_CONTRAST = 32  # 对比度
-USB_SATURATION = 64  # 饱和度
-USB_GAIN = 37  # 增益
-USB_GAMMA = 100  # Gamma
-USB_AUTO_WB = 1  # 0=手动 1=自动
-USB_WB_TEMPERATURE = 4600  # 色温 K
-USB_SHARPNESS = 2  # 锐度
-USB_BACKLIGHT = 0  # 背光补偿
-USB_HUE = 0  # 色调
-USB_FOURCC = 'MJPG'         # 编码格式
-USB_FPS = 60                # 目标帧率
+USB_PARAMS = _load_usb_params()
 
 # ---- D435 配置 ----
 D435_WIDTH = 848                                  # 彩色流宽度
@@ -876,28 +883,30 @@ class USBCameraSource:
         self._h: int = 480
 
     def start(self) -> None:
-        """打开相机，设置参数，加载标定，启动采集线程"""
+        """打开相机，从 camera_params.json 加载参数，加载标定，启动采集线程"""
         self._cap = cv2.VideoCapture(self._cam_num)
-
-        # --- USB 相机参数（由 t8.py 导出） ---
         cap = self._cap
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*USB_FOURCC))
+
+        # --- USB 相机固定参数 ---
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, USB_FPS)
-        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
-        cap.set(cv2.CAP_PROP_AUTO_WB, 1)
-        cap.set(cv2.CAP_PROP_EXPOSURE, 50)  # 手动曝光值
-        cap.set(cv2.CAP_PROP_BRIGHTNESS, -37)  # 亮度
-        cap.set(cv2.CAP_PROP_CONTRAST, 32)  # 对比度
-        cap.set(cv2.CAP_PROP_SATURATION, 64)  # 饱和度
-        cap.set(cv2.CAP_PROP_GAIN, 37)  # 增益
-        cap.set(cv2.CAP_PROP_GAMMA, 100)  # Gamma
-        cap.set(cv2.CAP_PROP_WB_TEMPERATURE, 4600)  # 色温 K
-        cap.set(cv2.CAP_PROP_SHARPNESS, 2)  # 锐度
-        cap.set(cv2.CAP_PROP_BACKLIGHT, 0)  # 背光补偿
-        cap.set(cv2.CAP_PROP_HUE, 0)  # 色调
+        cap.set(cv2.CAP_PROP_FPS, 30)
 
+        # --- USB 相机可调参数（从 camera_params.json 加载） ---
+        p = USB_PARAMS
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE,   p['auto_exposure'])
+        cap.set(cv2.CAP_PROP_AUTO_WB,         p['auto_wb'])
+        cap.set(cv2.CAP_PROP_EXPOSURE,        p['exposure'])
+        cap.set(cv2.CAP_PROP_BRIGHTNESS,      p['brightness'])
+        cap.set(cv2.CAP_PROP_CONTRAST,        p['contrast'])
+        cap.set(cv2.CAP_PROP_SATURATION,      p['saturation'])
+        cap.set(cv2.CAP_PROP_GAIN,            p['gain'])
+        cap.set(cv2.CAP_PROP_GAMMA,           p['gamma'])
+        cap.set(cv2.CAP_PROP_WB_TEMPERATURE,  p['wb_temperature'])
+        cap.set(cv2.CAP_PROP_SHARPNESS,       p['sharpness'])
+        cap.set(cv2.CAP_PROP_BACKLIGHT,       p['backlight'])
+        cap.set(cv2.CAP_PROP_HUE,             p['hue'])
 
         calib = np.load(self._calib_path)
         self._mtx = calib['mtx']
@@ -1430,6 +1439,7 @@ if __name__ == '__main__':
                 # 模式切换信号：由主线程统一执行 GUI 操作
                 if window_name == "__switch__":
                     cv2.destroyAllWindows()
+                    cv2.waitKey(1)  # 刷新 X11 事件队列，确保窗口真正销毁
                     last_window_name = ""
                     continue
 

@@ -1,0 +1,21 @@
+{
+  "auto_exposure": 3,
+  "exposure": 50,
+  "brightness": -37,
+  "contrast": 32,
+  "saturation": 64,
+  "gain": 37,
+  "gamma": 100,
+  "auto_wb": 1,
+  "wb_temperature": 4600,
+  "sharpness": 7,
+  "backlight": 0,
+  "hue": 0,
+  "_meta": {
+    "fourcc": "MJPG",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "export_time": "2026-07-15 13:48:04"
+  }
+}

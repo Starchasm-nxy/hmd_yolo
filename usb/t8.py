@@ -3,6 +3,7 @@ USB 相机参数实时调整工具
 =/- 调值 | j/k 选参 | r 自动 | d 出厂 | q 退出
 """
 
+import json
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -114,72 +115,105 @@ def reset_to_defaults(cap):
     print("=" * 50 + "\n")
 
 
-# ---------- 开关 ----------
+# ---------- 导入导出 ----------
+EXPORT_FILE = "camera_params.json"
+
+# t8内部key -> json字段名 + 注释
+_JSON_MAP = [
+    ('e', 'auto_exposure',       '0=手动 1=自动 3=光圈优先'),
+    ('X', 'exposure',            '手动曝光值'),
+    ('b', 'brightness',          '亮度'),
+    ('c', 'contrast',            '对比度'),
+    ('s', 'saturation',          '饱和度'),
+    ('g', 'gain',                '增益'),
+    ('m', 'gamma',               'Gamma'),
+    ('w', 'auto_wb',             '0=手动 1=自动'),
+    ('T', 'wb_temperature',      '色温 K'),
+    ('p', 'sharpness',           '锐度'),
+    ('B', 'backlight',           '背光补偿'),
+    ('h', 'hue',                 '色调'),
+]
+
+# json字段名 -> (OpenCV prop_id, 默认值)
+_JSON_TO_PROP = {
+    'auto_exposure':    (cv2.CAP_PROP_AUTO_EXPOSURE,   1),
+    'exposure':         (cv2.CAP_PROP_EXPOSURE,        0),
+    'brightness':       (cv2.CAP_PROP_BRIGHTNESS,      0),
+    'contrast':         (cv2.CAP_PROP_CONTRAST,       32),
+    'saturation':       (cv2.CAP_PROP_SATURATION,     64),
+    'gain':             (cv2.CAP_PROP_GAIN,            0),
+    'gamma':            (cv2.CAP_PROP_GAMMA,         100),
+    'auto_wb':          (cv2.CAP_PROP_AUTO_WB,         1),
+    'wb_temperature':   (cv2.CAP_PROP_WB_TEMPERATURE,4600),
+    'sharpness':        (cv2.CAP_PROP_SHARPNESS,       2),
+    'backlight':        (cv2.CAP_PROP_BACKLIGHT,       0),
+    'hue':              (cv2.CAP_PROP_HUE,             0),
+}
+
+
 def export_params(cap):
-    """导出当前参数为 4m.py 可直接使用的配置代码块"""
+    """导出当前相机参数到 camera_params.json"""
     read_all_params(cap)
-
-    # 简洁的变量名映射
-    var_map = {
-        'e': ('USB_AUTO_EXPOSURE',     '0=手动 1=自动 3=光圈优先'),
-        'X': ('USB_EXPOSURE',          '手动曝光值'),
-        'b': ('USB_BRIGHTNESS',        '亮度'),
-        'c': ('USB_CONTRAST',          '对比度'),
-        's': ('USB_SATURATION',        '饱和度'),
-        'g': ('USB_GAIN',              '增益'),
-        'm': ('USB_GAMMA',             'Gamma'),
-        'w': ('USB_AUTO_WB',           '0=手动 1=自动'),
-        'T': ('USB_WB_TEMPERATURE',    '色温 K'),
-        'p': ('USB_SHARPNESS',         '锐度'),
-        'B': ('USB_BACKLIGHT',         '背光补偿'),
-        'h': ('USB_HUE',               '色调'),
-    }
-
-    lines = []
-    lines.append("# ==================== USB相机参数（t8.py 导出） ====================")
-    lines.append(f"# 导出时间: {__import__('time').strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("")
-
-    for key, (var_name, note) in var_map.items():
-        val = current.get(key)
-        if val is None:
-            lines.append(f"# {var_name} = None  # 不支持")
-        else:
-            lines.append(f"{var_name} = {val}  # {note}")
-
-    lines.append("")
-    lines.append("# --- 可直接粘贴到 USBCameraSource.start() 的 cap.set() 块 ---")
-    lines.append("# cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))")
-    lines.append("# cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)")
-    lines.append("# cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)")
-    lines.append("# cap.set(cv2.CAP_PROP_FPS, 60)")
-    lines.append(f"cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, {current.get('e', 1)})")
-    lines.append(f"cap.set(cv2.CAP_PROP_AUTO_WB, {current.get('w', 1)})")
-    for key, (var_name, _note) in var_map.items():
-        if key in ('e', 'w'):
-            continue
-        pid_name = {
-            'X': 'cv2.CAP_PROP_EXPOSURE',    'b': 'cv2.CAP_PROP_BRIGHTNESS',
-            'c': 'cv2.CAP_PROP_CONTRAST',    's': 'cv2.CAP_PROP_SATURATION',
-            'g': 'cv2.CAP_PROP_GAIN',        'm': 'cv2.CAP_PROP_GAMMA',
-            'T': 'cv2.CAP_PROP_WB_TEMPERATURE', 'p': 'cv2.CAP_PROP_SHARPNESS',
-            'B': 'cv2.CAP_PROP_BACKLIGHT',   'h': 'cv2.CAP_PROP_HUE',
-        }.get(key)
-        val = current.get(key)
+    data = {}
+    for t8_key, json_key, _note in _JSON_MAP:
+        val = current.get(t8_key)
         if val is not None:
-            lines.append(f"cap.set({pid_name}, {val})  # {_note}")
+            data[json_key] = val
+    data['_meta'] = {
+        'fourcc': 'MJPG',
+        'width': 640,
+        'height': 480,
+        'fps': 30,
+        'export_time': __import__('time').strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    with open(EXPORT_FILE, 'w') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-    content = "\n".join(lines)
+    print(f"\n{'='*55}")
+    print(f"  参数已导出到 {EXPORT_FILE}")
+    print(f"{'='*55}")
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+    print(f"{'='*55}\n")
 
-    path = "camera_params_export.py"
-    with open(path, 'w') as f:
-        f.write(content + "\n")
 
-    print("\n" + "=" * 55)
-    print(f"  参数已导出到 {path}  (可直接复制到 4m.py)")
-    print("=" * 55)
-    print(content)
-    print("=" * 55 + "\n")
+def import_params(cap):
+    """从 camera_params.json 导入参数并写入相机"""
+    try:
+        with open(EXPORT_FILE, 'r') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"\n  [ERROR] {EXPORT_FILE} 不存在，请先按 s 导出")
+        return
+    except json.JSONDecodeError as e:
+        print(f"\n  [ERROR] JSON 解析失败: {e}")
+        return
+
+    print(f"\n{'='*55}")
+    print(f"  从 {EXPORT_FILE} 导入参数")
+    print(f"{'='*55}")
+
+    for json_key, (pid, default) in _JSON_TO_PROP.items():
+        val = data.get(json_key, default)
+        if json_key in ('auto_exposure', 'auto_wb'):
+            # 自动/手动开关类
+            label = {0: '手动', 1: '自动', 3: '光圈优先'}.get(val, str(val))
+            cap.set(pid, val)
+            # 更新 current
+            mapped_t8 = {'auto_exposure': 'e', 'auto_wb': 'w'}[json_key]
+            current[mapped_t8] = val
+            print(f"  {json_key}: {val} ({label})")
+        else:
+            cap.set(pid, val)
+            # 映射回 t8 key
+            for t8_key, jk, _ in _JSON_MAP:
+                if jk == json_key:
+                    current[t8_key] = val
+                    break
+            actual = int(cap.get(pid))
+            ok = "v" if actual == val else f"(读回:{actual})"
+            print(f"  {json_key}: {val} {ok}")
+
+    print(f"{'='*55}\n")
 
 
 def toggle_auto_exposure(cap):
@@ -280,7 +314,7 @@ def draw_ui(frame):
         desc = ""
 
     # 操作提示
-    tips = "=/-:调值 | j/k:选参 | e:曝光 w:白平衡 | r:自动 d:出厂 | q:退出"
+    tips = "=/-:调值 | j/k:选参 | e/w:曝光白平衡 r:自动 d:出厂 | s:导出 l:导入 | q:退出"
     t_y = h - 30
     overlay = _pil_put_text(overlay, (10, t_y), tips, font_tip, (180, 180, 180))
 
@@ -307,6 +341,8 @@ def print_help():
   │  w         │  切换自动白平衡 (手动/自动)       │
   │  r         │  切回自动模式（保留硬件当前值）   │
   │  d         │  恢复出厂默认值（写入预设值）     │
+  │  s         │  导出参数到 camera_params.json    │
+  │  l         │  从 camera_params.json 导入参数   │
   │  q         │  退出程序                         │
   ├────────────┴──────────────────────────────────┤
   │  选中行底部会显示该参数的功能说明             │
@@ -330,7 +366,7 @@ def main():
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, USB_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, USB_HEIGHT)
-    cap.set(cv2.CAP_PROP_FPS, 60)
+    cap.set(cv2.CAP_PROP_FPS, 30)
 
     read_all_params(cap)
     print("[INFO] 摄像头已打开，当前参数：")
@@ -373,6 +409,9 @@ def main():
 
         elif raw_key == ord('s'):
             export_params(cap)
+
+        elif raw_key == ord('l'):
+            import_params(cap)
 
         elif raw_key in (ord('='), ord('+'), 43, 61):
             key = PARAMS_LIST[selected_idx][0]
