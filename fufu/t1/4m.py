@@ -112,6 +112,7 @@ COORD_Y_MAX = 2.5
 # ---- USB 目标选择查表 ----
 USB_TARGET_MAP = {6: (1, 0), 5: (2, 1), 4: (2, 0),
                   3: (0, 1), 2: (0, 2), 1: (1, 2)}
+COLUMN_X_THRESHOLD = 1.0   # X 方向共列判定阈值（米）
 
 # ---- 窗口尺寸 ----
 DISPLAY_WIN_W = 1000                               # 显示窗口宽度
@@ -1082,9 +1083,57 @@ class USBDetectionPipeline:
         self._display_queue = display_queue
         self._mode_state = mode_state
 
+    @staticmethod
+    def _resolve_barrel_order(
+            centers: List[Tuple[float, float]],
+            threshold: float) -> List[Tuple[float, float]]:
+        """
+        根据几何布局将 3 个桶排成 [l目标, m目标, r目标]。
+        规则：检测共列 → m=后桶(Y大), l/r=前桶或独列桶。
+        返回长度为 3 的列表，索引 0/1/2 对应 l/m/r。
+        """
+        # 1. 按 X 分组
+        sorted_by_x = sorted(centers, key=lambda c: c[0])
+        groups: List[List[Tuple[float, float]]] = []
+        for c in sorted_by_x:
+            if not groups or abs(c[0] - groups[-1][-1][0]) > threshold:
+                groups.append([c])
+            else:
+                groups[-1].append(c)
+
+        # 2. 每组内按 Y 排（前→后，Y 小=近=前）
+        for g in groups:
+            g.sort(key=lambda c: c[1])
+
+        # 3. 根据分组数决定映射
+        if len(groups) == 3:
+            # 三列分开：l=左, m=中, r=右
+            return [groups[0][0], groups[1][0], groups[2][0]]
+
+        if len(groups) == 2:
+            big = groups[0] if len(groups[0]) == 2 else groups[1]
+            solo = groups[0] if len(groups[0]) == 1 else groups[1]
+
+            if big[0][0] < solo[0][0]:
+                # 共列在左：l=左前, m=左后, r=右独
+                return [big[0], big[1], solo[0]]
+            else:
+                # 共列在右：l=左独, m=右后, r=右前
+                return [solo[0], big[1], big[0]]
+
+        # 全 1 列（极端情况）：l=前, m=中, r=后
+        return [groups[0][0], groups[0][1], groups[0][2]]
+
     def run(self, stop_event: threading.Event,
             start_event: threading.Event) -> None:
         """USB YOLO 检测 + DBSCAN 聚类 + 多目标输出主循环"""
+        # ---- 预热预览：显示原始帧，不做检测 ----
+        last_seq = 0
+        while not start_event.is_set() and not stop_event.is_set():
+            got, frame, last_seq = self._camera.get_frame(last_seq)
+            if got and not self._display_queue.full():
+                self._display_queue.put((frame, "usb"))
+            time.sleep(POLL_SLEEP_FAST)
         start_event.wait()
         logger.info("usb_detect线程已启动")
 
@@ -1159,13 +1208,14 @@ class USBDetectionPipeline:
                         int(center[0]), int(center[1]), mtx, w, h)
                     camera_centers.append((x_cam, y_cam))
 
-                camera_centers.sort(key=lambda ctr: ctr[0])
-
                 if len(camera_centers) == 3:
+                    # 根据几何布局解析 l/m/r 映射（m=共列后桶）
+                    ordered = self._resolve_barrel_order(
+                        camera_centers, COLUMN_X_THRESHOLD)
                     d = self._mode_state.get_d()
                     i1, i2 = USB_TARGET_MAP.get(d, (1, 0))
-                    center1 = camera_centers[i1]
-                    center2 = camera_centers[i2]
+                    center1 = ordered[i1]
+                    center2 = ordered[i2]
 
                     c1x_ok = COORD_X_MIN <= center1[0] <= COORD_X_MAX
                     c1y_ok = COORD_Y_MIN <= center1[1] <= COORD_Y_MAX
@@ -1219,6 +1269,13 @@ class D435DetectionPipeline:
     def run(self, stop_event: threading.Event,
             start_event: threading.Event) -> None:
         """D435 LockTracker 检测管道主循环"""
+        # ---- 预热预览：显示原始帧，不做检测 ----
+        last_seq = 0
+        while not start_event.is_set() and not stop_event.is_set():
+            got, frame, last_seq = self._camera_src.get_frame(last_seq)
+            if got and not self._display_queue.full():
+                self._display_queue.put((frame, "d435"))
+            time.sleep(POLL_SLEEP_FAST)
         start_event.wait()
         logger.info("d435_detect线程已启动 (LockTracker pipeline)")
 
