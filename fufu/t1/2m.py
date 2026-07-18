@@ -47,8 +47,10 @@ FRAME_SKIP_N = 2
 LOCK_MAX_HIT = 15                     # 锁定最大命中帧数（达到后强制解锁重判）
 LOCK_MAX_MISS = 7                     # 锁定最大丢失帧数（达到后解锁）
 LOCK_SEARCH_RATIO = 2.5               # 搜索框相对于目标尺寸的放大比例
-LOCK_MIN_SEARCH_RADIUS = 130          # 搜索框最小半边长
+LOCK_MIN_SEARCH_RADIUS = 110          # 搜索框最小半边长
 LOCK_MAX_SEARCH_RADIUS = 270          # 搜索框最大半边长
+
+D435_PAUSE_TIMEOUT = 20.0             # 0 模式暂停超时（秒），超时释放相机
 
 # 模型推理参数（按模式区分）
 MODEL_2M_CONF = 0.5                   # 2m模式置信度阈值（全图+裁剪共用）
@@ -61,7 +63,7 @@ MODEL_1M_IOU = 0.45                   # NMS IoU阈值
 
 MODEL_IMGSZ_STEP = 32                 # 动态imgsz步长（对齐到32的倍数）
 MODEL_DEVICE = 'cpu'                  # 推理设备，'cpu'或'cuda:0'
-MAX_AREA = 112233                     # 最大目标面积，超过则过滤
+MAX_AREA = 66666                      # 最大目标面积，超过则过滤
 
 # 显示窗口名称
 DISPLAY_WIN_NAME = "d435"
@@ -69,7 +71,7 @@ DISPLAY_WIN_NAME = "d435"
 DISPLAY_QUEUE_SIZE = 3
 
 # ---- 超椭圆绘制参数 ----
-SUPERELLIPSE_P_LOCK = 2.5                      # draw_lock_rect / LockTracker 超椭圆指数
+SUPERELLIPSE_P_LOCK = 2.3                      # draw_lock_rect / LockTracker 超椭圆指数
 SUPERELLIPSE_NUM_POINTS = 100                  # 超椭圆采样点数
 
 # ANSI 颜色码
@@ -486,6 +488,17 @@ class LockTracker:
             self.lock_miss_count = 0
             self.lock_frame_count = 0
 
+    @staticmethod
+    def _pick_best(candidates: List) -> Optional[Any]:
+        """置信度梯队优先：最高置信度 ±0.2 内的候选中，选离画面中心最近的"""
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        max_conf = max(c[1] for c in candidates)
+        high = [c for c in candidates if max_conf - c[1] <= 0.2]
+        return min(high, key=lambda c: c[0])
+
     def update(self, detections: List[Detection]) -> TrackResult:
         """
         状态机主入口，线程安全。
@@ -512,14 +525,14 @@ class LockTracker:
         p= SUPERELLIPSE_P_LOCK # 超椭圆参数
 
         # 筛选搜索窗口内的候选检测
-        candidates = [(d.dis, d.cls, d.ux, d.uy, d.r)
+        candidates = [(d.dis, d.conf, d.cls, d.ux, d.uy, d.r)
                       for d in detections
-                      if abs((d.ux - ox) / shw) ** p + abs((d.uy - oy) / shh) ** p <= 1 ]
-        best = pick_nearest(candidates)     # 选择距离图像中心最近的候选
+                      if abs((d.ux - ox) / shw) ** p + abs((d.uy - oy) / shh) ** p <= 1]
+        best = self._pick_best(candidates)
 
         if best is not None:
             # Path 1: 窗口内有匹配 → 更新锁定目标
-            _, _, ux, uy, r = best
+            _, _, _, ux, uy, r = best
             w, h = abs(r[2] - r[0]), abs(r[3] - r[1])        # 计算新宽高
             self.lock_target = (ux, uy, w, h)                 # 更新锁定
             self.lock_miss_count = 0                          # 清零丢失计数
@@ -536,8 +549,8 @@ class LockTracker:
             self.lock_miss_count = 0
             self.lock_frame_count = 0
             # 从所有检测中选取最近的目标
-            best = pick_nearest([(d.dis, d.cls, d.ux, d.uy, d.r) for d in detections])
-            _, _, ux, uy, r = best
+            best = self._pick_best([(d.dis, d.conf, d.cls, d.ux, d.uy, d.r) for d in detections])
+            _, _, _, ux, uy, r = best
             w, h = abs(r[2] - r[0]), abs(r[3] - r[1])
             self.lock_target = (ux, uy, w, h)                 # 重新锁定
             _, _, _, _, nshw, nshh, narea = search_rect(ux, uy, w, h)
@@ -573,8 +586,8 @@ class LockTracker:
 
     def _unlocked_with_dets(self, detections: List[Detection]) -> TrackResult:
         """未锁定状态下收到检测：选择最近目标并锁定"""
-        best = pick_nearest([(d.dis, d.cls, d.ux, d.uy, d.r) for d in detections])
-        _, _, ux, uy, r = best
+        best = self._pick_best([(d.dis, d.conf, d.cls, d.ux, d.uy, d.r) for d in detections])
+        _, _, _, ux, uy, r = best
         w, h = abs(r[2] - r[0]), abs(r[3] - r[1])
         self.lock_target = (ux, uy, w, h)                    # 进入锁定状态
         self.lock_miss_count = 0
@@ -757,11 +770,25 @@ class DetectionPipeline:
         self.monitor = monitor           # 文件监视器（仅用于读取当前模式）
         self._model_mode: Optional[str] = None   # 当前实际使用的模型模式
         self._delay_until: float = 0.0           # 2m→1m 延时到期时间戳
+        self._used: bool = False                 # 是否用过 1m/2m（用于区分 0 模式）
+        self._pause_start: float = 0.0           # D435 暂停计时起点
+
+    @staticmethod
+    def _wait_for_clear() -> None:
+        """轮询 data.txt 直到为空（下位机清空=可以开始新一轮）"""
+        while True:
+            try:
+                with open('data.txt', 'r') as f:
+                    if f.read().strip() == '':
+                        break
+            except Exception:
+                pass
+            time.sleep(0.25)
+        yellow_log("data.txt 已清空，准备下一轮")
 
     def run(self, stop_event: threading.Event,
             display_queue: queue.Queue) -> None:
-        """主循环，运行在独立线程中"""
-        self.camera.start()              # 启动相机采集
+        """主循环，运行在独立线程中（camera 已在 main 启动）"""
         last_mode: Optional[str] = None  # 上一次的模式
         last_canvas: Optional[np.ndarray] = None  # 上一帧画布（用于跳帧时显示）
         last_seq: int = 0                # 已处理的帧序号
@@ -773,12 +800,42 @@ class DetectionPipeline:
                 mode = self.monitor.read_command()  # 获取当前命令（1m/2m/0/其他）
                 delay_time = 0.0
 
-                # 非1m/2m模式：若之前是有效模式则写'0'退出，然后休眠
+                # ---- 预热预览 / 暂停预览 ----
                 if mode not in ('1m', '2m'):
                     if last_mode in ('1m', '2m'):
+                        # 刚从检测切到暂停：写 '0'，启动计时
                         with open('gaozhi.txt', 'w') as f:
                             f.write('0')
+                        if not self._used:
+                            self._used = True
+                        self._pause_start = time.time()
                     last_mode = mode
+
+                    # 暂停超时检查（仅在用过 1m/2m 后）
+                    if self._used and time.time() - self._pause_start > D435_PAUSE_TIMEOUT:
+                        yellow_log(f"D435 暂停超时 {D435_PAUSE_TIMEOUT}s，释放相机")
+                        self.camera.stop()
+                        cv2.destroyAllWindows()
+                        self._wait_for_clear()
+                        # 重建相机，下一轮
+                        self.camera = CameraSource()
+                        self.camera.start()
+                        self.tracker.reset()
+                        self.writer.reset(cold_start=True)
+                        self._used = False
+                        self._model_mode = None
+                        last_seq = 0
+                        frame_count = 0
+                        yellow_log("D435 相机已重启（预热预览中，等待指令）")
+                        continue
+
+                    # 推原始帧预览（画面不冻）
+                    got, frame, last_seq = self.camera.get_frame(last_seq)
+                    if got:
+                        try:
+                            display_queue.put((frame, DISPLAY_WIN_NAME), block=False)
+                        except queue.Full:
+                            pass
                     time.sleep(0.01)
                     continue
 
@@ -940,6 +997,8 @@ def main() -> None:
         return
     logger.info("D435 相机已连接。")
 
+    camera.start()  # 提前启动相机预热
+    yellow_log("D435 相机已开启（预热预览中，等待指令）")
 
     monitor.start()                              # 启动文件监视线程
 
