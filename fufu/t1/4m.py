@@ -86,7 +86,7 @@ MODEL_1M_IOU = 0.45                              # NMS IoU 阈值
 
 MODEL_IMGSZ_STEP = 32                            # 动态 imgsz 步长（对齐到 32 的倍数）
 MODEL_DEVICE = 'cpu'                             # 推理设备
-MAX_AREA = 66666                                # 最大目标面积，超过则过滤
+MAX_AREA = 30000                                 # 最大目标面积，超过则过滤
 
 # ---- D435历史清空 ----
 HISTORY_CLEAR_ENABLED = True
