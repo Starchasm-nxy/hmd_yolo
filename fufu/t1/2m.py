@@ -62,7 +62,7 @@ MODEL_1M_IOU = 0.45                   # NMS IoU阈值
 
 MODEL_IMGSZ_STEP = 32                 # 动态imgsz步长（对齐到32的倍数）
 MODEL_DEVICE = 'cpu'                  # 推理设备，'cpu'或'cuda:0'
-MAX_AREA = 30000                      # 最大目标面积，超过则过滤
+MAX_AREA = 66666                      # 最大目标面积，超过则过滤
 
 # 显示窗口名称
 DISPLAY_WIN_NAME = "d435"

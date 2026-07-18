@@ -86,7 +86,7 @@ MODEL_1M_IOU = 0.45                              # NMS IoU 阈值
 
 MODEL_IMGSZ_STEP = 32                            # 动态 imgsz 步长（对齐到 32 的倍数）
 MODEL_DEVICE = 'cpu'                             # 推理设备
-MAX_AREA = 30000                                 # 最大目标面积，超过则过滤
+MAX_AREA = 70000                                 # 最大目标面积，超过则过滤
 
 # ---- D435历史清空 ----
 HISTORY_CLEAR_ENABLED = True
@@ -1145,22 +1145,22 @@ class USBDetectionPipeline:
             else:
                 groups[-1].append(c)
 
-        # 2. 每组内按 Y 排（前→后，Y 小=近=前）
+        # 2. 每组内按 Y 排（前→后，Y 大=近=前，画面底部=前）
         for g in groups:
-            g.sort(key=lambda c: c[1])
+            g.sort(key=lambda c: -c[1])  # Y 降序：前→后
 
-        # 3. 根据分组数决定映射
+        # 3. 根据分组数决定映射（m=后桶=Y小的那个）
         if len(groups) == 3:
             return [groups[0][0], groups[1][0], groups[2][0]], groups
 
         if len(groups) == 2:
             big = groups[0] if len(groups[0]) == 2 else groups[1]
             solo = groups[0] if len(groups[0]) == 1 else groups[1]
-
+            # big[0]=前(Y大), big[1]=后(Y小), m=后
             if big[0][0] < solo[0][0]:
-                return [big[0], big[1], solo[0]], groups
+                return [big[0], big[1], solo[0]], groups  # l=前, m=后, r=solo
             else:
-                return [solo[0], big[1], big[0]], groups
+                return [solo[0], big[1], big[0]], groups  # l=solo, m=后, r=前
 
         return [groups[0][0], groups[0][1], groups[0][2]], groups
 
@@ -1364,8 +1364,6 @@ class D435DetectionPipeline:
         """D435 LockTracker 检测管道主循环"""
         logger.info("d435_detect线程已启动 (LockTracker pipeline)")
 
-        self._writer.reset(cold_start=True)
-
         # ---- 后台加载 YOLO 模型 ----
         detector_ref: List[Any] = [None]
         model_ready = threading.Event()
@@ -1394,6 +1392,8 @@ class D435DetectionPipeline:
         loader.join()
         detector = detector_ref[0]
         yellow_log("D435 收到检测命令，开始识别")
+
+        self._writer.reset(cold_start=True)
 
         last_b: Optional[int] = None
         last_mode: Optional[str] = None
