@@ -6,6 +6,7 @@ __pycache__/
 # Large video/data directories (uncomment if you want to include)
 videos_color/
 videos_depth/
+聚类结果图/
 
 # IDE
 .vscode/
